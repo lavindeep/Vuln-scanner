@@ -1,0 +1,110 @@
+name: Security Scan Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Build ──────────────────────────────────────────────────────────
+      - name: Build Docker image
+        run: docker build -t vuln-scanner:${{ github.sha }} .
+
+      # ── Trivy: human-readable table to console ─────────────────────────
+      - name: Trivy scan - Table output
+        uses: aquasecurity/trivy-action@0.33.0
+        with:
+          image-ref: vuln-scanner:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+        continue-on-error: true
+
+      # ── Trivy: JSON output for downstream processing ───────────────────
+      - name: Trivy scan - JSON output
+        uses: aquasecurity/trivy-action@0.33.0
+        with:
+          image-ref: vuln-scanner:${{ github.sha }}
+          format: json
+          output: trivy-results.json
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+        continue-on-error: true
+
+      # ── SBOM generation ────────────────────────────────────────────────
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: vuln-scanner:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+          upload-artifact: false
+
+      # ── Dockerfile base image check ────────────────────────────────────
+      - name: Verify allowed base image
+        if: always()
+        run: |
+          BASE_IMAGE=$(grep "^FROM" Dockerfile | head -1 | awk '{print $2}' | sed 's/ AS.*//')
+          ALLOWED="python:3.12-slim python:3.11-slim"
+          if echo "$ALLOWED" | grep -qw "$BASE_IMAGE"; then
+            echo "✅ Base image '$BASE_IMAGE' is allowed"
+          else
+            echo "❌ Base image '$BASE_IMAGE' is NOT in allowed list: $ALLOWED"
+            exit 1
+          fi
+
+      # ── NIST 800-53 compliance mapping ─────────────────────────────────
+      - name: Run NIST 800-53 Compliance Mapper
+        if: always()
+        run: python scripts/compliance_mapper.py
+
+      # ── OPA policy evaluation ──────────────────────────────────────────
+      - name: Setup OPA
+        if: always()
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: latest
+
+      - name: Run OPA Policy Evaluation
+        if: always()
+        run: |
+          opa eval \
+            -d policies/ \
+            -i trivy-results.json \
+            --format json \
+            'data.image_policy' \
+            > opa-output.json
+          cat opa-output.json
+
+      # ── Dashboard report ───────────────────────────────────────────────
+      - name: Generate Dashboard Report
+        if: always()
+        run: python scripts/generate_report.py
+
+      # ── Upload all artifacts ───────────────────────────────────────────
+      - name: Upload Security Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            trivy-results.json
+            sbom.cyclonedx.json
+            compliance-report.md
+            opa-output.json
+            dashboard.md
