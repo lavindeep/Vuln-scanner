@@ -48,7 +48,11 @@ violation contains msg if {
 }
 
 # Helper: check if a label exists in the Trivy metadata.
-# The path may vary across Trivy versions — try both known locations.
+# The path varies across Trivy versions — try all known locations.
+_has_label(label) if {
+	input.Metadata.ImageConfig.config.Labels[label]
+}
+
 _has_label(label) if {
 	input.Metadata.ImageConfig.Config.Labels[label]
 }
