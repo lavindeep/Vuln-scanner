@@ -58,21 +58,24 @@ curl http://localhost:8000/health # Health check
 The Dockerfile uses a **multi-stage build** — dependencies are installed in a temporary builder stage, then only the runtime files are copied to the final image. The app runs as a non-root user (`appuser`) for security compliance.
 
 ### 2. Trivy Vulnerability Scan
-[Trivy](https://github.com/aquasecurity/trivy) scans the built image for known CVEs. The pipeline runs two passes: a human-readable table printed to the Actions console, and a JSON export consumed by downstream scripts. The build **fails** if any CRITICAL or HIGH severity CVEs with available fixes are detected.
+[Trivy](https://github.com/aquasecurity/trivy) scans the built image for known CVEs. The pipeline runs two passes: a human-readable table printed to the Actions console, and a JSON export consumed by downstream scripts. A final security gate **fails the pipeline** if any CRITICAL or HIGH severity CVEs with available fixes are detected, after all reporting steps complete.
 
 ### 3. SBOM Generation
 [Syft](https://github.com/anchore/syft) produces a CycloneDX-format Software Bill of Materials listing every package in the image. This satisfies Executive Order 14028 Section 4(e) requirements for SBOM delivery.
 
-### 4. OPA Policy Evaluation
+### 4. Base Image Verification
+A shell step extracts the base image from the Dockerfile's `FROM` statement and checks it against an allowed list (`python:3.12-slim`, `python:3.11-slim`). The pipeline **fails** if an unapproved base image is used.
+
+### 5. OPA Policy Evaluation
 [Open Policy Agent](https://www.openpolicyagent.org/) evaluates the scan results against custom Rego policies:
 - **No CRITICAL CVEs** — any critical finding is an automatic violation
 - **90-day patch window** — CVEs older than 90 days with available fixes must be remediated
 - **Required labels** — the Docker image must have `maintainer`, `version`, and `description` labels
 
-### 5. NIST 800-53 Compliance Mapping
+### 6. NIST 800-53 Compliance Mapping
 A custom Python script maps each vulnerability to relevant NIST 800-53 Rev5 controls, producing a structured compliance report.
 
-### 6. Dashboard Report
+### 7. Dashboard Report
 A final script aggregates all outputs into a single markdown dashboard with pass/fail status, severity counts, policy violations, and top findings — designed for non-technical reviewers like program managers or ATO reviewers.
 
 ## NIST 800-53 Controls
@@ -96,12 +99,9 @@ EO 14028 (May 2021) requires federal agencies and their software suppliers to:
 
 ## Customize Policies
 
-Edit `policies/image_policy.rego` to adjust:
+Edit `policies/image_policy.rego` to adjust OPA rules:
 
 ```rego
-# Add or remove allowed base images
-allowed_bases := {"python:3.12-slim", "python:3.11-slim"}
-
 # Change the max CVE age (days)
 age_days > 90   # ← change this number
 
@@ -109,7 +109,10 @@ age_days > 90   # ← change this number
 required_labels := {"maintainer", "version", "description"}
 ```
 
-The base image is also verified in the workflow via a `grep` check on the Dockerfile's `FROM` statement for reliability.
+Allowed base images are verified in the workflow via a shell `grep` step on the
+Dockerfile's `FROM` statement. Edit the `ALLOWED` variable in
+`.github/workflows/security-scan.yml` (step "Verify allowed base image") to
+change the list.
 
 ## Artifacts
 

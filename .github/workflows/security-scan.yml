@@ -108,3 +108,24 @@ jobs:
             compliance-report.md
             opa-output.json
             dashboard.md
+
+      # ── Final security gate ──────────────────────────────────────────────
+      - name: Security gate - fail on vulnerabilities
+        if: always()
+        run: |
+          if [ ! -f trivy-results.json ]; then
+            echo "❌ trivy-results.json not found — cannot evaluate security gate"
+            exit 1
+          fi
+          VULN_COUNT=$(python3 -c "
+          import json
+          data = json.load(open('trivy-results.json'))
+          vulns = [v for r in data.get('Results', []) for v in (r.get('Vulnerabilities') or [])]
+          print(len(vulns))
+          ")
+          if [ "$VULN_COUNT" -gt 0 ]; then
+            echo "❌ Security gate FAILED: $VULN_COUNT CRITICAL/HIGH fixable vulnerabilities found"
+            exit 1
+          else
+            echo "✅ Security gate PASSED: 0 vulnerabilities"
+          fi

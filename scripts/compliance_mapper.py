@@ -13,7 +13,6 @@ Uses only Python standard library — no pip install needed in CI.
 """
 
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -101,8 +100,8 @@ def load_trivy_results(path: str = "trivy-results.json") -> list[dict]:
     """Load and flatten vulnerabilities from Trivy JSON output."""
     try:
         data = json.loads(Path(path).read_text())
-    except FileNotFoundError:
-        print(f"⚠ {path} not found — scan may not have completed.")
+    except (FileNotFoundError, json.JSONDecodeError):
+        print(f"⚠ {path} not found or contains invalid JSON — scan may not have completed.")
         return []
 
     vulns = []
