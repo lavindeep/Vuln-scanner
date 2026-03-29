@@ -10,7 +10,7 @@ A CI/CD pipeline that automatically scans Docker container images for known vuln
 flowchart LR
     A[Code Push / PR] --> B[Docker Build]
     B --> C[Trivy CVE Scan]
-    C -->|CRITICAL/HIGH| D[❌ Block Merge]
+    C -->|CRITICAL/HIGH| D[Block Merge]
     C -->|Clean| E[Syft SBOM]
     E --> F[OPA Policy Check]
     F --> G[NIST 800-53 Mapper]
